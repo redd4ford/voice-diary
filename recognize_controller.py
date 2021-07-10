@@ -1,17 +1,16 @@
-import wave
-import json
-import vosk
+import speech_recognition as sr
+import os
 
 
-def recognize_phrase(model: vosk.Model, file_path: str) -> str:
+def recognize_phrase(file_path: str, language='en-US') -> str:
     """
-    Recognize Russian speech in a .wav file
+    Recognize speech in a .wav file
     """
-
-    wave_audio_file = wave.open(file_path, "rb")
-    offline_recognizer = vosk.KaldiRecognizer(model, 24000)
-    data = wave_audio_file.readframes(wave_audio_file.getnframes())
-
-    offline_recognizer.AcceptWaveform(data)
-    recognized_data = json.loads(offline_recognizer.Result())["text"]
-    return recognized_data
+    r = sr.Recognizer()
+    if os.path.isfile(file_path):
+        with sr.AudioFile(file_path) as src:
+            audio_data = r.record(src)
+            text = r.recognize_google(audio_data, language=language)
+        return text
+    else:
+        raise Exception('SERVER ERROR')
