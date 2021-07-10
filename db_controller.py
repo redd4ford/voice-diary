@@ -1,13 +1,10 @@
 import firebase_admin
 from firebase_admin import firestore, exceptions
-from utils import date_to_timestamp, days_ago_timestamp
+from utils import date_to_timestamp, timestamp_to_date, days_ago_timestamp
 
-
-if not firebase_admin._apps:
-    cred = firebase_admin.credentials.Certificate("serviceAccountKey.json")
-    firebase_admin.initialize_app(cred)
+cred = firebase_admin.credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred)
 db = firestore.client()
-
 
 user_recs_ref = lambda user_id: db.collection('Users').document(str(user_id)).collection('Recordings')
 
@@ -27,7 +24,8 @@ async def create_recording(user_id: int, recording: dict):
                 .set({
                     'timestamp': recording['timestamp'],
                     'topic': recording['topic'],
-                    'text': recording['text']
+                    'text': recording['text'],
+                    'language': recording['language']
                 })
     except exceptions.PermissionDeniedError:
         print('PERMISSION DENIED')
@@ -39,13 +37,14 @@ async def create_recording(user_id: int, recording: dict):
         print('OK')
 
 
-async def delete_recording(user_id: int, date: str):
+async def delete_recording(user_id: int, timestamp: int):
     """
-    Delete the user's recording by its doc ID (date).
+    Delete the user's recording by its timestamp.
     :param user_id: the user's Telegram ID.
-    :param date: the recording's doc ID.
+    :param timestamp: the recording's date in timestamp.
     :return: none
     """
+    date = timestamp_to_date(timestamp)
     try:
         curr_rec_ref(user_id, date)\
                 .delete()
@@ -94,7 +93,7 @@ async def fetch_by_date(user_id: int, date: str, is_exact: bool) -> list:
             return user_recs_ref(user_id) \
                 .order_by('timestamp', direction='ASCENDING')\
                 .start_at({'timestamp': date_to_timestamp(date)})\
-                .end_before({'timestamp': days_ago_timestamp(-1)})\
+                .end_before({'timestamp': days_ago_timestamp(-1, date=date)})\
                 .get()
     except exceptions.PermissionDeniedError:
         print('PERMISSION DENIED')
