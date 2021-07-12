@@ -1,20 +1,19 @@
 import os
 import re
-import subprocess
-import time
 from collections import defaultdict
 
+import google.api_core.exceptions as g
 from aiogram import Bot, types
 from aiogram.dispatcher import Dispatcher
 from aiogram.types import ParseMode
 from aiogram.utils import executor
 
 import db_controller
-from user_state import UserState
 from bot_kb import get_rec_kb, get_lan_kb, freq_used_topics_kb, freq_used_dates_kb
-from recognize_controller import recognize_phrase
+from recognize_controller import recognize_google_api, recognize_speech_to_text
+from user_state import UserState
 from utils import days_ago_date, get_current_date, date_to_timestamp, timestamp_to_date, process_fetched, \
-    process_text, format_recording
+    process_text, format_recording, ogg_to_wav
 
 TOKEN = 'TOKEN'
 
@@ -23,7 +22,8 @@ dp = Dispatcher(bot)
 
 
 USER_DATA = defaultdict(defaultdict)
-AUDIO_STATES = [UserState.AUDIO_INPUT_TOPIC, UserState.AUDIO_INPUT_LANGUAGE, UserState.AUDIO_PROCESSING]
+AUDIO_STATES = [UserState.AUDIO_INPUT_TOPIC, UserState.AUDIO_INPUT_LANGUAGE, UserState.AUDIO_AUTO_LANGUAGE,
+                UserState.AUDIO_PROCESSING]
 
 
 @dp.message_handler(commands=['start'])
@@ -185,14 +185,14 @@ async def process_get_text_input(msg: types.Message):
 
     elif USER_DATA[msg.from_user.id]['state'] == UserState.AUDIO_INPUT_TOPIC:
         USER_DATA[msg.from_user.id]['recording']['topic'] = msg.text
-        USER_DATA[msg.from_user.id]['state'] = UserState.AUDIO_INPUT_LANGUAGE
-        await msg.reply('Now enter the language of your voice message.', reply_markup=get_lan_kb)
+        # try auto detecting the language with Speech-To-Text
+        await convert_voice_message_using_s2t(msg)
 
     elif USER_DATA[msg.from_user.id]['state'] == UserState.AUDIO_INPUT_LANGUAGE:
         # buttons also contain flag emojis, so we need to remove them from msg.text
         USER_DATA[msg.from_user.id]['recording']['language'] = msg.text[3:]
         USER_DATA[msg.from_user.id]['state'] = UserState.AUDIO_PROCESSING
-        await convert_voice_message(msg)
+        await convert_voice_message_using_gapi(msg)
 
     elif USER_DATA[msg.from_user.id]['state'] == UserState.IDLE and command:
         timestamp = int(command.group(1))
@@ -214,31 +214,53 @@ async def process_voice_message(msg: types.Message):
         await bot.download_file(voice_message.file_path, f'{msg.chat.id}_{timestamp}.ogg')
 
         USER_DATA[msg.from_user.id]['state'] = UserState.AUDIO_INPUT_TOPIC
-        await msg.reply(f'Please enter the topic for this recording.', reply_markup=freq_used_topics_kb)
+        await msg.reply(f'Please choose the topic for this recording.', reply_markup=freq_used_topics_kb)
 
 
-async def convert_voice_message(msg: types.Message):
+async def convert_voice_message_using_s2t(msg: types.Message):
     filename = f'{msg.from_user.id}_{USER_DATA[msg.from_user.id]["recording"]["timestamp"]}'
     try:
-        # convert ogg to wav using ffmpeg
-        subprocess.Popen(['ffmpeg', '-i', f'{filename}.ogg', f'{filename}.wav'], shell=True)
-        # wait before it updates the list of files
-        time.sleep(0.5)
+        ogg_to_wav(filename)
+        language, text = recognize_speech_to_text(f'{filename}.wav')
+        USER_DATA[msg.from_user.id]['recording']['language'] = language
+        USER_DATA[msg.from_user.id]['recording']['text'] = process_text(text)
+    except g.PermissionDenied:
+        print('SERVER ERROR, SWITCHING TO GOOGLE SPEECH API')
+        USER_DATA[msg.from_user.id]['state'] = UserState.AUDIO_INPUT_LANGUAGE
+        await msg.reply('Now enter the language of your voice message.', reply_markup=get_lan_kb)
+    else:
+        await db_controller.create_recording(user_id=msg.from_user.id,
+                                             recording=USER_DATA[msg.from_user.id]['recording'])
+        await msg.reply(f'Message stored: {USER_DATA[msg.from_user.id]["recording"]["date"]}',
+                        reply_markup=get_rec_kb)
+        clear_user_data(msg)
+
+
+async def convert_voice_message_using_gapi(msg: types.Message):
+    filename = f'{msg.from_user.id}_{USER_DATA[msg.from_user.id]["recording"]["timestamp"]}'
+    try:
+        if not os.path.exists(f'{filename}.wav'):
+            ogg_to_wav(filename)
         USER_DATA[msg.from_user.id]['recording']['text'] = process_text(
-            recognize_phrase(f'{filename}.wav', language=USER_DATA[msg.from_user.id]['recording']['language'])
+            recognize_google_api(f'{filename}.wav', language=USER_DATA[msg.from_user.id]['recording']['language'])
         )
         await db_controller.create_recording(user_id=msg.from_user.id,
                                              recording=USER_DATA[msg.from_user.id]['recording'])
-    except FileNotFoundError:
+    except (FileNotFoundError, PermissionError):
         print('SERVER ERROR')
+        await msg.reply(f'An error has occurred. Please try again later.', reply_markup=get_rec_kb)
     else:
         await msg.reply(f'Message stored: {USER_DATA[msg.from_user.id]["recording"]["date"]}', reply_markup=get_rec_kb)
     finally:
-        os.remove(f'{filename}.ogg')
-        os.remove(f'{filename}.wav')
-        print(USER_DATA)
-        USER_DATA[msg.from_user.id].pop('recording')
-        USER_DATA[msg.from_user.id]['state'] = UserState.IDLE
+        clear_user_data(msg)
+
+
+def clear_user_data(msg: types.Message):
+    filename = f'{msg.from_user.id}_{USER_DATA[msg.from_user.id]["recording"]["timestamp"]}'
+    os.remove(f'{filename}.ogg')
+    os.remove(f'{filename}.wav')
+    USER_DATA[msg.from_user.id].pop('recording')
+    USER_DATA[msg.from_user.id]['state'] = UserState.IDLE
 
 
 if __name__ == '__main__':
