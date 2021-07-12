@@ -1,6 +1,9 @@
 import datetime
-from dateutil import parser
 import re
+import subprocess
+import time
+
+from dateutil import parser
 
 
 def get_current_date() -> str:
@@ -32,7 +35,7 @@ def process_fetched(fetched_data) -> list:
 def process_text(text: str) -> str:
     add_dots_indices = []
     for index, symbol in enumerate(text):
-        if symbol == ' ' and text[index + 1].istitle():
+        if symbol == ' ' and text[index + 1].istitle() and text[index - 1] != '.':
             add_dots_indices.append(index)
     for arr_index, index in enumerate(add_dots_indices):
         text = text[:index] + '.' + text[index:]
@@ -55,3 +58,10 @@ def format_recording(recording: dict) -> str:
            f'<i>{text_len} words</i>\n\n' \
            f'{recording["text"]}\n\n' \
            f'🗑️ /d_{recording["timestamp"]}'
+
+
+def ogg_to_wav(filename: str):
+    # convert ogg to wav using ffmpeg
+    subprocess.Popen(['ffmpeg', '-i', f'{filename}.ogg', f'{filename}.wav', '-loglevel', 'quiet'], shell=True)
+    # wait before it updates the list of files
+    time.sleep(0.5)
