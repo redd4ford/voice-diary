@@ -150,7 +150,6 @@ async def fetch_between(user_id: int, date1: str, date2: str) -> list:
     :param date2: the second date of the interval.
     :return: a list of DocumentSnapshots (still need to be converted to dicts!)
     """
-    print(date_to_timestamp(date1), date_to_timestamp(date2))
     if date_to_timestamp(date1) == date_to_timestamp(date2):
         await fetch_by_date(user_id, date1, is_exact=True)
     else:
@@ -175,7 +174,6 @@ async def fetch_after(user_id: int, date: str) -> list:
     :param date: the date to fetch after.
     :return: a list of DocumentSnapshots (still need to be converted to dicts!)
     """
-    print(date_to_timestamp(date))
     try:
         return user_recs_ref(user_id) \
                 .order_by('timestamp', direction='ASCENDING') \
