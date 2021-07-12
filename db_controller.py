@@ -1,8 +1,9 @@
 import firebase_admin
-from firebase_admin import firestore, exceptions
+from firebase_admin import firestore
+from firebase_admin import exceptions as f
 from utils import date_to_timestamp, timestamp_to_date, days_ago_timestamp
 
-cred = firebase_admin.credentials.Certificate("serviceAccountKey.json")
+cred = firebase_admin.credentials.Certificate('serviceAccountKey.json')
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -27,11 +28,11 @@ async def create_recording(user_id: int, recording: dict):
                     'text': recording['text'],
                     'language': recording['language']
                 })
-    except exceptions.PermissionDeniedError:
+    except f.PermissionDeniedError:
         print('PERMISSION DENIED')
-    except exceptions.UnavailableError:
+    except f.UnavailableError:
         print('FIRESTORE UNAVAILABLE')
-    except exceptions.UnknownError:
+    except f.UnknownError:
         print('UNKNOWN ERROR')
     else:
         print('OK')
@@ -48,11 +49,11 @@ async def delete_recording(user_id: int, timestamp: int):
     try:
         curr_rec_ref(user_id, date)\
                 .delete()
-    except exceptions.PermissionDeniedError:
+    except f.PermissionDeniedError:
         print('PERMISSION DENIED')
-    except exceptions.UnavailableError:
+    except f.UnavailableError:
         print('FIRESTORE UNAVAILABLE')
-    except exceptions.UnknownError:
+    except f.UnknownError:
         print('UNKNOWN ERROR')
     else:
         print('OK')
@@ -67,11 +68,11 @@ async def fetch_all(user_id: int) -> dict:
     try:
         return user_recs_ref(user_id)\
                 .get()
-    except exceptions.PermissionDeniedError:
+    except f.PermissionDeniedError:
         print('PERMISSION DENIED')
-    except exceptions.UnavailableError:
+    except f.UnavailableError:
         print('FIRESTORE UNAVAILABLE')
-    except exceptions.UnknownError:
+    except f.UnknownError:
         print('UNKNOWN ERROR')
 
 
@@ -95,11 +96,11 @@ async def fetch_by_date(user_id: int, date: str, is_exact: bool) -> list:
                 .start_at({'timestamp': date_to_timestamp(date)})\
                 .end_before({'timestamp': days_ago_timestamp(-1, date=date)})\
                 .get()
-    except exceptions.PermissionDeniedError:
+    except f.PermissionDeniedError:
         print('PERMISSION DENIED')
-    except exceptions.UnavailableError:
+    except f.UnavailableError:
         print('FIRESTORE UNAVAILABLE')
-    except exceptions.UnknownError:
+    except f.UnknownError:
         print('UNKNOWN ERROR')
 
 
@@ -114,11 +115,11 @@ async def fetch_by_topic(user_id: int, topic: str) -> list:
         return user_recs_ref(user_id)\
                 .where('topic', '==', topic)\
                 .get()
-    except exceptions.PermissionDeniedError:
+    except f.PermissionDeniedError:
         print('PERMISSION DENIED')
-    except exceptions.UnavailableError:
+    except f.UnavailableError:
         print('FIRESTORE UNAVAILABLE')
-    except exceptions.UnknownError:
+    except f.UnknownError:
         print('UNKNOWN ERROR')
 
 
@@ -134,11 +135,11 @@ async def fetch_last_n(user_id: int, number: int) -> list:
                 .order_by('timestamp', direction='DESCENDING')\
                 .limit(number)\
                 .get()
-    except exceptions.PermissionDeniedError:
+    except f.PermissionDeniedError:
         print('PERMISSION DENIED')
-    except exceptions.UnavailableError:
+    except f.UnavailableError:
         print('FIRESTORE UNAVAILABLE')
-    except exceptions.UnknownError:
+    except f.UnknownError:
         print('UNKNOWN ERROR')
 
 
@@ -159,11 +160,11 @@ async def fetch_between(user_id: int, date1: str, date2: str) -> list:
                     .start_at({'timestamp': min(date_to_timestamp(date1), date_to_timestamp(date2))})\
                     .end_at({'timestamp': max(date_to_timestamp(date1), date_to_timestamp(date2))})\
                     .get()
-        except exceptions.PermissionDeniedError:
+        except f.PermissionDeniedError:
             print('PERMISSION DENIED')
-        except exceptions.UnavailableError:
+        except f.UnavailableError:
             print('FIRESTORE UNAVAILABLE')
-        except exceptions.UnknownError:
+        except f.UnknownError:
             print('UNKNOWN ERROR')
 
 
@@ -179,9 +180,9 @@ async def fetch_after(user_id: int, date: str) -> list:
                 .order_by('timestamp', direction='ASCENDING') \
                 .start_after({'timestamp': date_to_timestamp(date)})\
                 .get()
-    except exceptions.PermissionDeniedError:
+    except f.PermissionDeniedError:
         print('PERMISSION DENIED')
-    except exceptions.UnavailableError:
+    except f.UnavailableError:
         print('FIRESTORE UNAVAILABLE')
-    except exceptions.UnknownError:
+    except f.UnknownError:
         print('UNKNOWN ERROR')
