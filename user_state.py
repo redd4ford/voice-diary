@@ -4,6 +4,7 @@ from enum import Enum
 class UserState(Enum):
     IDLE = 'IDLE'
     AUDIO_INPUT_TOPIC = 'AUD_INP_TP'
+    AUDIO_AUTO_LANGUAGE = 'AUD_AUT_LN'
     AUDIO_INPUT_LANGUAGE = 'AUD_INP_LN'
     AUDIO_PROCESSING = 'AUD_PR'
     GET_ALL = 'GET_ALL'
