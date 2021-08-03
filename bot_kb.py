@@ -1,10 +1,10 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 
-get_rec_kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)\
-    .add(KeyboardButton('Get all the recordings'))\
+get_entries_kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)\
+    .add(KeyboardButton('Get all the entries'))\
     .row(KeyboardButton('by date'), KeyboardButton('by topic'))\
-    .add(KeyboardButton('last N recordings'))\
+    .add(KeyboardButton('last N entries'))\
     .row(KeyboardButton('between two dates'), KeyboardButton('after date'))
 
 get_lan_kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)\

@@ -7,26 +7,26 @@ cred = firebase_admin.credentials.Certificate('serviceAccountKey.json')
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-user_recs_ref = lambda user_id: db.collection('Users').document(str(user_id)).collection('Recordings')
+user_recs_ref = lambda user_id: db.collection('Users').document(str(user_id)).collection('Entries')
 
 curr_rec_ref = lambda user_id, date: user_recs_ref(user_id).document(date)
 
 
-async def create_recording(user_id: int, recording: dict):
+async def create_entry(user_id: int, entry: dict):
     """
-    Save a recording to the user's collection of Recordings in Firestore.
+    Save a entry to the user's collection of entries in Firestore.
     :param user_id: the user's Telegram ID.
-    :param recording: the recording's data in a dictionary: date, timestamp, topic, text.
+    :param entry: the entry's data in a dictionary: date, timestamp, topic, text.
     :return: none
     """
     try:
         user_recs_ref(user_id)\
-                .document(recording['date'])\
+                .document(entry['date'])\
                 .set({
-                    'timestamp': recording['timestamp'],
-                    'topic': recording['topic'],
-                    'text': recording['text'],
-                    'language': recording['language']
+                    'timestamp': entry['timestamp'],
+                    'topic': entry['topic'],
+                    'text': entry['text'],
+                    'language': entry['language']
                 })
     except f.PermissionDeniedError:
         print('PERMISSION DENIED')
@@ -38,11 +38,11 @@ async def create_recording(user_id: int, recording: dict):
         print('OK')
 
 
-async def delete_recording(user_id: int, timestamp: int):
+async def delete_entry(user_id: int, timestamp: int):
     """
-    Delete the user's recording by its timestamp.
+    Delete the user's entry by its timestamp.
     :param user_id: the user's Telegram ID.
-    :param timestamp: the recording's date in timestamp.
+    :param timestamp: the entry's date in timestamp.
     :return: none
     """
     date = timestamp_to_date(timestamp)
@@ -61,7 +61,7 @@ async def delete_recording(user_id: int, timestamp: int):
 
 async def fetch_all(user_id: int) -> dict:
     """
-    Get the user's recordings.
+    Get the user's entries.
     :param user_id: the user's Telegram ID.
     :return: a list of DocumentSnapshots (still need to be converted to dicts!)
     """
@@ -78,15 +78,15 @@ async def fetch_all(user_id: int) -> dict:
 
 async def fetch_by_date(user_id: int, date: str, is_exact: bool) -> list:
     """
-    Fetch all recordings for the date if the date is presented like YY-mm-dd without timing.
+    Fetch all entries for the date if the date is presented like YY-mm-dd without timing.
     :param user_id: the user's Telegram ID.
-    :param date: the date to fetch the recordings for.
-    :param is_exact: is date the exact datetime; if not, parse all the recordings for that day.
+    :param date: the date to fetch the entries for.
+    :param is_exact: is date the exact datetime; if not, parse all the entries for that day.
     :return: a list of DocumentSnapshots (still need to be converted to dicts!)
     """
     try:
         if is_exact:
-            # if the exact data is passed, get the recording by its doc ID
+            # if the exact data is passed, get the entry by its doc ID
             return [user_recs_ref(user_id)
                     .document(date)
                     .get()]
@@ -106,7 +106,7 @@ async def fetch_by_date(user_id: int, date: str, is_exact: bool) -> list:
 
 async def fetch_by_topic(user_id: int, topic: str) -> list:
     """
-    Get all the recordings by topic param.
+    Get all the entries by topic param.
     :param user_id: the user's Telegram ID.
     :param topic: the topic to search for.
     :return: a list of DocumentSnapshots (still need to be converted to dicts!)
@@ -125,9 +125,9 @@ async def fetch_by_topic(user_id: int, topic: str) -> list:
 
 async def fetch_last_n(user_id: int, number: int) -> list:
     """
-    Get the user's N last recordings.
+    Get the user's N last entries.
     :param user_id: the user's Telegram ID.
-    :param number: the number of recordings to fetch.
+    :param number: the number of entries to fetch.
     :return: a list of DocumentSnapshots (still need to be converted to dicts!)
     """
     try:
@@ -145,7 +145,7 @@ async def fetch_last_n(user_id: int, number: int) -> list:
 
 async def fetch_between(user_id: int, date1: str, date2: str) -> list:
     """
-    Get all the recordings between two dates. Handles the cases when date1 >= date2.
+    Get all the entries between two dates. Handles the cases when date1 >= date2.
     :param user_id: the user's Telegram ID.
     :param date1: the first date of the interval.
     :param date2: the second date of the interval.
@@ -170,7 +170,7 @@ async def fetch_between(user_id: int, date1: str, date2: str) -> list:
 
 async def fetch_after(user_id: int, date: str) -> list:
     """
-    Get all the recordings after a specific date.
+    Get all the entries after a specific date.
     :param user_id: the user's Telegram ID.
     :param date: the date to fetch after.
     :return: a list of DocumentSnapshots (still need to be converted to dicts!)

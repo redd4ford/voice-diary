@@ -19,7 +19,7 @@ def recognize_google_api(file_path: str, language='en-US') -> str:
 def recognize_speech_to_text(file_path: str) -> tuple[str, str]:
     client = sr_s2t.SpeechClient.from_service_account_json('serviceAccountKey.json')
     if os.path.isfile(file_path):
-        with open(file_path, "rb") as f:
+        with open(file_path, 'rb') as f:
             content = f.read()
 
         audio = sr_s2t.RecognitionAudio(content=content)
@@ -32,6 +32,8 @@ def recognize_speech_to_text(file_path: str) -> tuple[str, str]:
         transcript = ''
         languages = {'en-US': 0, 'ru-RU': 0, 'uk-UA': 0}
         for i, result in enumerate(response.results):
+            # language_code comes in lowercase (en-us, ru-ru, uk-ua),
+            # so we need to convert the last part of it to uppercase
             lan_code = result.language_code[:3] + result.language_code[3:].upper()
             languages[lan_code] += 1
             alternative = result.alternatives[0]
@@ -46,5 +48,5 @@ def get_used_language(languages: dict) -> str:
 
 
 def get_channels(file_path: str) -> int:
-    with wave.open(file_path, "rb") as wave_file:
+    with wave.open(file_path, 'rb') as wave_file:
         return wave_file.getnchannels()

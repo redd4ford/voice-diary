@@ -1,10 +1,14 @@
 import datetime
 import re
+import os
 import subprocess
 import time
+from user_state import UserState
 
 from dateutil import parser
 
+
+# DATE & TIME RELATED FUNCTIONS
 
 def get_current_date() -> str:
     return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -28,8 +32,12 @@ def days_ago_timestamp(days: int, date=datetime.date.today()) -> int:
     return date_to_timestamp(days_ago_date(days=days, date=date))
 
 
+def get_current_timestamp_len() -> int:
+    return len(str(date_to_timestamp(get_current_date())))
+
+
 def process_fetched(fetched_data) -> list:
-    return sorted([recording.to_dict() for recording in fetched_data], key=lambda rec: rec['timestamp'])
+    return sorted([entry.to_dict() for entry in fetched_data], key=lambda rec: rec['timestamp'])
 
 
 def process_text(text: str) -> str:
@@ -46,18 +54,17 @@ def process_text(text: str) -> str:
     return text
 
 
-def format_recording(recording: dict) -> str:
+def format_entry(entry: dict) -> str:
     language_flags = {'en-US': '🇺🇸', 'ru-RU': '🇷🇺', 'uk-UA': '🇺🇦'}
-    recording_header = f'{timestamp_to_date(recording["timestamp"])} | ' \
-                       f'{language_flags[recording["language"]]} {recording["topic"]}'
-    text_len = len(re.findall(r'\w+', recording["text"]))
-    line_len = int(len(recording_header) * 1.6)
+    entry_header = f'{timestamp_to_date(entry["timestamp"])} | {language_flags[entry["language"]]} {entry["topic"]}'
+    text_len = len(re.findall(r'\w+', entry["text"]))
+    line_len = int(len(entry_header) * 1.6)
 
-    return f'<b>{recording_header}</b>\n' \
+    return f'<b>{entry_header}</b>\n' \
            f'{"-" * line_len}\n' \
            f'<i>{text_len} words</i>\n\n' \
-           f'{recording["text"]}\n\n' \
-           f'🗑️ /d_{recording["timestamp"]}'
+           f'{entry["text"]}\n\n' \
+           f'🗑️ /d_{entry["timestamp"]}'
 
 
 def ogg_to_wav(filename: str):
@@ -65,3 +72,11 @@ def ogg_to_wav(filename: str):
     subprocess.Popen(['ffmpeg', '-i', f'{filename}.ogg', f'{filename}.wav', '-loglevel', 'quiet'], shell=True)
     # wait before it updates the list of files
     time.sleep(0.5)
+
+
+def clear_user_data(uid: int, user_data_ref: dict):
+    filename = f'{uid}_{user_data_ref["entry"]["timestamp"]}'
+    os.remove(f'{filename}.ogg')
+    os.remove(f'{filename}.wav')
+    user_data_ref.pop('entry')
+    user_data_ref['state'] = UserState.IDLE
