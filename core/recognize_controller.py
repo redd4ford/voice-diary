@@ -53,16 +53,15 @@ class SpeechToTextApiRecognitionController(SpeechRecognitionController):
             with open(file_path, 'rb') as f:
                 content = f.read()
 
-            audio = self.api_ref.RecognitionAudio(content=content)
-
-            config = self.api_ref.RecognitionConfig(
-                audio_channel_count=self.get_channels(file_path),
-                enable_automatic_punctuation=True,
-                language_code='en-US',
-                alternative_language_codes=['uk-UA']
+            response = self.recognizer.recognize(
+                config=self.api_ref.RecognitionConfig(
+                    audio_channel_count=self.get_channels(file_path),
+                    enable_automatic_punctuation=True,
+                    language_code='en-US',
+                    alternative_language_codes=['uk-UA']
+                ),
+                audio=self.api_ref.RecognitionAudio(content=content)
             )
-
-            response = self.recognizer.recognize(config=config, audio=audio)
             transcript = ''
 
             languages = {'en-US': 0, 'uk-UA': 0}
