@@ -1,32 +1,29 @@
 import os
-import re
 from collections import defaultdict
+
 from dotenv import load_dotenv
 from functools import wraps
 
-import google.api_core.exceptions as google_api_exceptions
-from aiogram import (
-    Bot,
-    types,
-)
+import google.api_core.exceptions as google_api_exc
+import google.auth.exceptions as google_auth_exc
+
+from aiogram import types
+from aiogram.bot import Bot
 from aiogram.dispatcher import Dispatcher
-from aiogram.types import ParseMode
 from aiogram.utils import executor
 
 from core import (
-    DatabaseController,
-    SpeechToTextApiRecognitionController,
-    GoogleApiRecognitionController,
+    Responder,
+    FileController,
     UserState,
     UserController,
+    DatabaseController,
+    RecognitionController,
 )
 from utils import (
-    Keyboards,
     DateFormatter,
     EntryFormatter,
-    ogg_to_wav,
-    user_id,
-    Commands,
+    MessageTypes,
 )
 
 
@@ -35,7 +32,14 @@ load_dotenv()
 bot = Bot(token=os.getenv('TOKEN'))
 dp = Dispatcher(bot)
 
-db_controller = DatabaseController()
+db_controller = DatabaseController(
+    project_id=os.environ.get('FIREBASE_PROJECT_ID'),
+    private_key_id=os.environ.get('FIREBASE_PRIVATE_KEY_ID'),
+    private_key=os.environ.get('FIREBASE_PRIVATE_KEY'),
+    client_email=os.environ.get('FIREBASE_CLIENT_EMAIL'),
+    client_id=os.environ.get('FIREBASE_CLIENT_ID'),
+    cert_url=os.environ.get('FIREBASE_CLIENT_X509_CERT_URL')
+)
 
 USER_DATA = defaultdict(defaultdict)
 user_controller = UserController(USER_DATA)
@@ -45,115 +49,95 @@ def use_state(func):
     @wraps(func)
     def out(*args, **kwargs):
         msg = args[0]
-        if not user_controller.is_registered(msg):
-            user_controller.register(msg)
-        return func(*args, **kwargs)
+        uid = msg.from_user.id
+        if not user_controller.is_registered(uid):
+            user_controller.register(uid)
+        return func(uid, *args, **kwargs)
 
     return out
 
 
-@dp.message_handler(commands=['start'])
+@dp.message_handler(commands=MessageTypes.Commands.START)
 @use_state
-async def process_start_command(msg: types.Message):
-    await msg.reply(
-        'Hello there!\nI can recognize phrases from your voice messages, convert them to txt, '
-        'and store in Firestore DB. Send me a voice message to start. I support messages in '
-        '<b>English</b> and <b>Ukrainian.</b>',
-        reply_markup=Keyboards.GET_ENTRIES, parse_mode=ParseMode.HTML
-    )
+async def process_start_command(uid: int, msg: types.Message):
+    await Responder.respond(msg, content=Responder.Types.START(uid))
 
 
-@dp.message_handler(text=['Get all the entries'])
+@dp.message_handler(text=MessageTypes.GetEntriesKeyboardChoices.GET_ALL_ENTRIES)
 @use_state
-async def process_get_all(msg: types.Message):
-    if not user_controller.user(msg).is_state_in(UserState.audio_states()):
-        user_controller.user(msg).set_state(UserState.GET_ALL)
+async def process_get_all(uid: int, msg: types.Message):
+    if not user_controller.user(uid).is_state_in(UserState.AUDIO_STATES()):
+        user_controller.user(uid).set_state(UserState.GET_ALL)
 
-        entries = EntryFormatter.process_fetched(await db_controller.fetch_all(user_id(msg)))
+        entries = EntryFormatter.process_fetched(await db_controller.fetch_all(uid))
         await print_entries(msg, entries)
 
-        user_controller.user(msg).set_state(UserState.IDLE)
+        user_controller.user(uid).set_state(UserState.IDLE)
 
 
-@dp.message_handler(text=['by date', 'after date'])
+@dp.message_handler(text=MessageTypes.GetEntriesKeyboardChoices.GET_ALL_ENTRIES_BY_DATE)
 @use_state
-async def process_get_by_date(msg: types.Message):
-    if not user_controller.user(msg).is_state_in(UserState.audio_states()):
-        user_controller.user(msg).set_state(
+async def process_get_by_date(uid: int, msg: types.Message):
+    if not user_controller.user(uid).is_state_in(UserState.AUDIO_STATES()):
+        user_controller.user(uid).set_state(
             UserState.GET_BY_DATE
             if msg.text == 'by date' else
             UserState.GET_ALL_AFTER
         )
-        await msg.reply(
-            'Send me a date in format <b>YYYY-mm-dd HH:MM:SS</b> or just <b>YYYY-mm-dd</b>.',
-            reply_markup=Keyboards.FREQUENTLY_USED_DATES, parse_mode=ParseMode.HTML
-        )
+        await Responder.respond(msg, content=Responder.Types.GET_ALL_ENTRIES_BY_DATE)
 
 
-@dp.message_handler(text=['Today', 'Yesterday', 'Past week'])
+@dp.message_handler(text=MessageTypes.GetEntriesKeyboardChoices.GET_ALL_ENTRIES_BY_RECENT_DATE)
 @use_state
-async def process_get_date_kb(msg: types.Message):
-    if user_controller.user(msg).is_state_in(UserState.date_states_single()):
-        days_since = {'Today': 0, 'Yesterday': 1, 'Past week': 7}
-        datestamp = DateFormatter.days_ago_date(days=days_since[msg.text])
+async def process_get_date_kb(uid: int, msg: types.Message):
+    if user_controller.user(uid).is_state_in(UserState.ONE_DATE_STATES()):
+        datestamp = DateFormatter.days_ago_date(days=DateFormatter.count_days_since(msg.text))
 
         entries = EntryFormatter.process_fetched(
-            await db_controller.fetch_by_date(user_id(msg), date=datestamp, is_exact=False)
-            if user_controller.user(msg).is_state(UserState.GET_BY_DATE) else
-            await db_controller.fetch_after_date(user_id(msg), date=datestamp)
+            await db_controller.fetch_by_date(uid, date=datestamp, is_exact=False)
+            if user_controller.user(uid).is_state(UserState.GET_BY_DATE) else
+            await db_controller.fetch_after_date(uid, date=datestamp)
         )
         await print_entries(msg, entries)
-        user_controller.user(msg).set_state(UserState.IDLE)
+        user_controller.user(uid).set_state(UserState.IDLE)
 
 
-@dp.message_handler(text=['between two dates'])
+@dp.message_handler(text=MessageTypes.GetEntriesKeyboardChoices.GET_ALL_BETWEEN_TWO_DATES)
 @use_state
-async def process_get_between(msg: types.Message):
-    if not user_controller.user(msg).is_state_in(UserState.audio_states()):
-        user_controller.user(msg).set_state(UserState.GET_ALL_BETWEEN)
-        await msg.reply(
-            'Send me two dates separated by space in format <b>YYYY-mm-dd HH:MM:SS YYYY-mm-dd '
-            'HH:MM:SS</b> or just <b>YYYY-mm-dd YYYY-mm-dd</b>.',
-            parse_mode=ParseMode.HTML
-        )
+async def process_get_between(uid: int, msg: types.Message):
+    if not user_controller.user(uid).is_state_in(UserState.AUDIO_STATES()):
+        user_controller.user(uid).set_state(UserState.GET_ALL_BETWEEN)
+        await Responder.respond(msg, content=Responder.Types.GET_ALL_ENTRIES_BETWEEN_TWO_DATES)
 
 
-@dp.message_handler(regexp=r'^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$')
+@dp.message_handler(regexp=MessageTypes.RegularExpressions.MATCH_DATE_WITH_OPTIONAL_TIME)
 @use_state
-async def process_get_date_input(msg: types.Message):
-    if not user_controller.user(msg).is_state_in(UserState.audio_states()):
+async def process_get_date_input(uid: int, msg: types.Message):
+    if not user_controller.user(uid).is_state_in(UserState.AUDIO_STATES()):
         datestamp = msg.text
-        if user_controller.user(msg).is_state(UserState.GET_BY_DATE):
-            # there are only two acceptable cases: either it's just a date or it's a date plus time
-            is_date_without_time = True
-            if len(datestamp) == DateFormatter.DATESTAMP_LEN_WITHOUT_TIME:
-                datestamp = f'{datestamp} 00:00:00'
-                is_date_without_time = False
+        is_date_with_time, datestamp = DateFormatter.add_time_to_datestamp_if_needed(datestamp)
+        if user_controller.user(uid).is_state(UserState.GET_BY_DATE):
             entries = EntryFormatter.process_fetched(
                 await db_controller.fetch_by_date(
-                    user_id(msg), date=datestamp, is_exact=is_date_without_time
+                    uid, date=datestamp, is_exact=is_date_with_time
                 )
             )
             await print_entries(msg, entries)
-            user_controller.user(msg).set_state(UserState.IDLE)
-        elif user_controller.user(msg).is_state(UserState.GET_ALL_AFTER):
-            if len(datestamp) == DateFormatter.DATESTAMP_LEN_WITHOUT_TIME:
-                datestamp = f'{datestamp} 00:00:00'
-            if len(datestamp) == DateFormatter.DATESTAMP_LEN_WITH_TIME:
-                entries = EntryFormatter.process_fetched(
-                    await db_controller.fetch_after_date(user_id(msg), date=datestamp)
-                )
-                await print_entries(msg, entries)
-            user_controller.user(msg).set_state(UserState.IDLE)
+            user_controller.user(uid).set_state(UserState.IDLE)
+        elif user_controller.user(uid).is_state(UserState.GET_ALL_AFTER):
+            entries = EntryFormatter.process_fetched(
+                await db_controller.fetch_after_date(uid, date=datestamp)
+            )
+            await print_entries(msg, entries)
+            user_controller.user(uid).set_state(UserState.IDLE)
 
 
-@dp.message_handler(regexp=r'^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})? \d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$')
+@dp.message_handler(regexp=MessageTypes.RegularExpressions.MATCH_TWO_DATES_WITH_OPTIONAL_TIME)
 @use_state
-async def process_get_between_input(msg: types.Message):
-
+async def process_get_between_input(uid: int, msg: types.Message):
     if all([
-        not user_controller.user(msg).is_state_in(UserState.audio_states()),
-        user_controller.user(msg).is_state(UserState.GET_ALL_BETWEEN)
+        not user_controller.user(uid).is_state_in(UserState.AUDIO_STATES()),
+        user_controller.user(uid).is_state(UserState.GET_ALL_BETWEEN)
     ]):
         datestamps = msg.text
 
@@ -164,157 +148,139 @@ async def process_get_between_input(msg: types.Message):
             date1, date2 = DateFormatter.split_datestamps_in_two_dates(datestamps)
 
             entries = EntryFormatter.process_fetched(
-                await db_controller.fetch_between_dates(user_id(msg), date1, date2)
+                await db_controller.fetch_between_dates(uid, date1, date2)
             )
             await print_entries(msg, entries)
-            user_controller.user(msg).set_state(UserState.IDLE)
+            user_controller.user(uid).set_state(UserState.IDLE)
 
 
-@dp.message_handler(text=['last N entries'])
+@dp.message_handler(text=MessageTypes.GetEntriesKeyboardChoices.GET_LAST_N_ENTRIES)
 @use_state
-async def process_get_last_n_command(msg: types.Message):
-    if not user_controller.user(msg).is_state_in(UserState.audio_states()):
-        user_controller.user(msg).set_state(UserState.GET_LAST_N)
-        await msg.reply('Send me a number of entries you want to get.')
+async def process_get_last_n_command(uid: int, msg: types.Message):
+    if not user_controller.user(uid).is_state_in(UserState.AUDIO_STATES()):
+        user_controller.user(uid).set_state(UserState.GET_LAST_N)
+        await Responder.respond(msg, content=Responder.Types.GET_LAST_N_ENTRIES)
 
 
-@dp.message_handler(regexp=r'^\d+$')
+@dp.message_handler(regexp=MessageTypes.RegularExpressions.MATCH_NUMBER)
 @use_state
-async def process_get_number_input(msg: types.Message):
-    if user_controller.user(msg).is_state(UserState.GET_LAST_N):
+async def process_number_of_entries_to_get_input(uid: int, msg: types.Message):
+    if user_controller.user(uid).is_state(UserState.GET_LAST_N):
         entries = EntryFormatter.process_fetched(
-            await db_controller.fetch_last_n(user_id(msg), number=int(msg.text))
+            await db_controller.fetch_last_n(uid, number=int(msg.text))
         )
         await print_entries(msg, entries)
-        user_controller.user(msg).set_state(UserState.IDLE)
+        user_controller.user(uid).set_state(UserState.IDLE)
 
 
-@dp.message_handler(text=['by topic'])
+@dp.message_handler(text=MessageTypes.GetEntriesKeyboardChoices.GET_ALL_ENTRIES_BY_TOPIC)
 @use_state
-async def process_get_by_topic_command(msg: types.Message):
-    if not user_controller.user(msg).is_state_in(UserState.audio_states()):
-        user_controller.user(msg).set_state(UserState.GET_BY_TOPIC)
-        await msg.reply(
-            'Send me a topic name to search for.',
-            reply_markup=Keyboards.FREQUENTLY_USED_TOPICS
-        )
+async def process_get_by_topic_command(uid: int, msg: types.Message):
+    if not user_controller.user(uid).is_state_in(UserState.AUDIO_STATES()):
+        user_controller.user(uid).set_state(UserState.GET_BY_TOPIC)
+        await Responder.respond(msg, content=Responder.Types.GET_ALL_ENTRIES_BY_TOPIC)
 
 
-@dp.message_handler(regexp=r'^.*$')
+@dp.message_handler(regexp=MessageTypes.RegularExpressions.MATCH_ANY_TEXT)
 @use_state
-async def process_get_text_input(msg: types.Message):
-    delete_command = re.search(Commands.DELETE_REGEX, msg.text)
+async def process_get_text_input(uid: int, msg: types.Message):
+    delete_command = MessageTypes.get_delete_command(msg.text)
 
-    if user_controller.user(msg).is_state(UserState.GET_BY_TOPIC):
+    if user_controller.user(uid).is_state(UserState.GET_BY_TOPIC):
         entries = EntryFormatter.process_fetched(
-            await db_controller.fetch_by_topic(user_id(msg), topic=msg.text)
+            await db_controller.fetch_by_topic(uid, topic=msg.text)
         )
         await print_entries(msg, entries)
-        user_controller.user(msg).set_state(UserState.IDLE)
+        user_controller.user(uid).set_state(UserState.IDLE)
 
-    elif user_controller.user(msg).is_state(UserState.AUDIO_INPUT_TOPIC):
-        user_controller.user(msg).cache_entry_data(topic=msg.text)
-
+    elif user_controller.user(uid).is_state(UserState.AUDIO_INPUT_TOPIC):
+        user_controller.user(uid).cache_entry_data(topic=msg.text)
         # try auto-detecting the language with Speech-To-Text
-        user_controller.user(msg).set_state(UserState.AUDIO_AUTO_LANGUAGE)
-        await convert_voice_message_using_s2t(msg)
+        user_controller.user(uid).set_state(UserState.AUDIO_AUTO_LANGUAGE)
+        await convert_voice_message_using_s2t(uid, msg)
 
-    elif user_controller.user(msg).is_state(UserState.AUDIO_INPUT_LANGUAGE):
+    elif user_controller.user(uid).is_state(UserState.AUDIO_INPUT_LANGUAGE):
         # buttons also contain flag emojis, so we need to remove them from msg.text
-        user_controller.user(msg).cache_entry_data(language=msg.text[3:])
-        user_controller.user(msg).set_state(UserState.AUDIO_PROCESSING)
-        await convert_voice_message_using_gapi(msg)
+        user_controller.user(uid).cache_entry_data(language=msg.text[3:])
+        user_controller.user(uid).set_state(UserState.AUDIO_PROCESSING)
+        await convert_voice_message_using_gapi(uid, msg)
 
-    elif user_controller.user(msg).is_state(UserState.IDLE) and delete_command:
+    elif user_controller.user(uid).is_state(UserState.IDLE) and delete_command:
         timestamp = int(delete_command.group(1))
-        await db_controller.delete_entry(user_id(msg), timestamp=timestamp)
-        await msg.reply(
-            f'Successfully removed the entry: <b>{DateFormatter.timestamp_to_date(timestamp=timestamp)}</b>',
-            reply_markup=Keyboards.FREQUENTLY_USED_TOPICS, parse_mode=ParseMode.HTML
-        )
+        eid = await db_controller.delete_entry(uid, timestamp=timestamp)
+        await Responder.respond(msg, content=Responder.Types.REMOVE_ENTRY_SUCCESS(eid))
 
 
-@dp.message_handler(content_types=['voice'])
+@dp.message_handler(content_types=MessageTypes.ContentTypes.VOICE)
 @use_state
-async def process_voice_message(msg: types.Message):
-    if not user_controller.user(msg).is_state_in(UserState.audio_states()):
+async def process_voice_message(uid: int, msg: types.Message):
+    if not user_controller.user(uid).is_state_in(UserState.AUDIO_STATES()):
         datestamp = DateFormatter.get_current_date()
         timestamp = DateFormatter.date_to_timestamp(datestamp)
-        user_controller.user(msg).cache_entry_data(date=datestamp, timestamp=timestamp, topic='None')
+        user_controller.user(uid).cache_entry_data(
+            date=datestamp, timestamp=timestamp, topic='None'
+        )
 
         voice_message = await bot.get_file(msg.voice.file_id)
         await bot.download_file(voice_message.file_path, f'{msg.chat.id}_{timestamp}.ogg')
 
-        user_controller.user(msg).set_state(UserState.AUDIO_INPUT_TOPIC)
-        await msg.reply(
-            f'Please choose the topic for this entry.',
-            reply_markup=Keyboards.FREQUENTLY_USED_TOPICS
-        )
+        user_controller.user(uid).set_state(UserState.AUDIO_INPUT_TOPIC)
+        await Responder.respond(msg, content=Responder.Types.CHOOSE_TOPIC_FOR_NEW_ENTRY)
 
 
-async def convert_voice_message_using_s2t(msg: types.Message):
-    filename = user_controller.user(msg).get_voice_message_filename()
+async def convert_voice_message_using_s2t(uid: int, msg: types.Message):
     try:
-        ogg_to_wav(filename)
-        language, text = (
-            SpeechToTextApiRecognitionController().recognize(f'{filename}.wav')
+        filename = FileController.convert_ogg_to_wav(
+            filename=user_controller.user(uid).voice_message_filename
         )
-        user_controller.user(msg).cache_entry_data(
+        speech_recognizer = RecognitionController.strategy(recognition_type='s2t')
+        language, text = speech_recognizer.recognize(f'{filename}.wav')
+
+        user_controller.user(uid).cache_entry_data(
             language=language, text=EntryFormatter.process_text(text)
         )
-    except google_api_exceptions.PermissionDenied:
-        print('SERVER ERROR, SWITCHING TO GOOGLE SPEECH API')
-        user_controller.user(msg).set_state(UserState.AUDIO_INPUT_LANGUAGE)
-        await msg.reply(
-            'Now enter the language of your voice message.',
-            reply_markup=Keyboards.GET_LANGUAGES
-        )
+    except (google_api_exc.PermissionDenied, google_auth_exc.MalformedError):
+        # switching to Google Speech API
+        user_controller.user(uid).set_state(UserState.AUDIO_INPUT_LANGUAGE)
+        await Responder.respond(msg, content=Responder.Types.CHOOSE_LANGUAGE_FOR_NEW_ENTRY)
     else:
-        await db_controller.create_entry(user_id(msg), entry=user_controller.user(msg).current_entry)
-        await msg.reply(
-            f'Message stored: {user_controller.user(msg).current_entry.date}',
-            reply_markup=Keyboards.GET_ENTRIES
-        )
-        user_controller.user(msg).clear_cache()
+        if len(text):
+            eid = await db_controller.create_entry(uid, user_controller.user(uid).current_entry)
+            await Responder.respond(msg, content=Responder.Types.CREATE_ENTRY_SUCCESS(eid))
+        else:
+            await Responder.respond(msg, content=Responder.Types.TEXT_NOT_RECOGNIZED)
+        user_controller.user(uid).clear_cache()
 
 
-async def convert_voice_message_using_gapi(msg: types.Message):
-    filename = user_controller.user(msg).get_voice_message_filename()
+async def convert_voice_message_using_gapi(uid: int, msg: types.Message):
     try:
-        if not os.path.exists(f'{filename}.wav'):
-            ogg_to_wav(filename)
-        text = GoogleApiRecognitionController().recognize(
-            f'{filename}.wav', language=user_controller.user(msg).current_entry.language
+        filename = FileController.convert_ogg_to_wav(
+            filename=user_controller.user(uid).voice_message_filename
         )
-        user_controller.user(msg).cache_entry_data(text=EntryFormatter.process_text(text))
-        await db_controller.create_entry(user_id(msg), entry=user_controller.user(msg).current_entry)
+        speech_recognizer = RecognitionController.strategy(recognition_type='gapi')
+        selected_language = user_controller.user(uid).current_entry.language
+        text = speech_recognizer.recognize(f'{filename}.wav', selected_language)
+
+        user_controller.user(uid).cache_entry_data(text=EntryFormatter.process_text(text))
     except (FileNotFoundError, PermissionError):
-        print('SERVER ERROR')
-        await msg.reply(
-            f'An error has occurred. Please try again later.',
-            reply_markup=Keyboards.GET_ENTRIES
-        )
+        await Responder.respond(msg, content=Responder.Types.ERROR)
     else:
-        await msg.reply(
-            f'Message stored: {user_controller.user(msg).current_entry.date}',
-            reply_markup=Keyboards.GET_ENTRIES
-        )
+        if len(text):
+            eid = await db_controller.create_entry(uid, user_controller.user(uid).current_entry)
+            await Responder.respond(msg, content=Responder.Types.CREATE_ENTRY_SUCCESS(eid))
+        else:
+            await Responder.respond(msg, content=Responder.Types.TEXT_NOT_RECOGNIZED)
     finally:
-        user_controller.user(msg).clear_cache()
+        user_controller.user(uid).clear_cache()
 
 
 async def print_entries(msg: types.Message, entries: list):
-    if len(entries) == 0:
-        await msg.reply(
-            'No entries found!',
-            reply_markup=Keyboards.GET_ENTRIES, parse_mode=ParseMode.HTML
-        )
-    else:
+    if len(entries):
         for entry in entries:
-            await msg.reply(
-                EntryFormatter.format_entry(entry=entry),
-                reply_markup=Keyboards.GET_ENTRIES, parse_mode=ParseMode.HTML
-            )
+            formatted = EntryFormatter.format_entry(entry=entry)
+            await Responder.respond(msg, content=Responder.Types.PRINT_ENTRY(formatted))
+    else:
+        await Responder.respond(msg, content=Responder.Types.ENTRIES_NOT_FOUND)
 
 
 if __name__ == '__main__':

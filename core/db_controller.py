@@ -1,5 +1,3 @@
-import os
-
 import firebase_admin
 from firebase_admin import firestore
 from firebase_admin import exceptions as firebase_exceptions
@@ -9,31 +7,34 @@ from utils import DateFormatter
 
 
 class DatabaseController:
-    def __init__(self):
+    def __init__(
+        self, project_id: str, private_key_id: str, private_key: str, client_email: str,
+        client_id: str, cert_url: str,
+    ):
         cred = firebase_admin.credentials.Certificate(
             cert={
                 'type': 'service_account',
-                'project_id': os.environ.get('FIREBASE_PROJECT_ID'),
-                'private_key_id': os.environ.get('FIREBASE_PRIVATE_KEY_ID'),
-                'private_key': os.environ.get('FIREBASE_PRIVATE_KEY').replace('\\n', '\n'),
-                'client_email': os.environ.get('FIREBASE_CLIENT_EMAIL'),
-                'client_id': os.environ.get('FIREBASE_CLIENT_ID'),
+                'project_id': project_id,
+                'private_key_id': private_key_id,
+                'private_key': private_key.replace('\\n', '\n'),
+                'client_email': client_email,
+                'client_id': client_id,
                 'auth_uri': 'https://accounts.google.com/o/oauth2/auth',
                 'token_uri': 'https://oauth2.googleapis.com/token',
                 'auth_provider_x509_cert_url': 'https://www.googleapis.com/oauth2/v1/certs',
-                'client_x509_cert_url': os.environ.get('FIREBASE_CLIENT_X509_CERT_URL')
+                'client_x509_cert_url': cert_url
             }
         )
         firebase_admin.initialize_app(cred)
-        self.db = firestore.client()
+        self._db = firestore.client()
 
     def user_entries_ref(self, user_id: int):
-        return self.db.collection('Users').document(f'{user_id}').collection('Entries')
+        return self._db.collection('Users').document(f'{user_id}').collection('Entries')
 
     def curr_entry_ref(self, user_id: int, date: str):
         return self.user_entries_ref(user_id).document(date)
 
-    async def create_entry(self, user_id: int, entry: Entry) -> None:
+    async def create_entry(self, user_id: int, entry: Entry) -> str:
         """
         Save an entry to the user's collection of entries in Firestore.
         :param user_id: the user's Telegram ID.
@@ -60,9 +61,9 @@ class DatabaseController:
         except firebase_exceptions.UnknownError:
             print('UNKNOWN ERROR')
         else:
-            print('OK')
+            return entry['date']
 
-    async def delete_entry(self, user_id: int, timestamp: int) -> None:
+    async def delete_entry(self, user_id: int, timestamp: int) -> str:
         """
         Delete the user's entry by its timestamp.
         :param user_id: the user's Telegram ID.
@@ -83,7 +84,7 @@ class DatabaseController:
         except firebase_exceptions.UnknownError:
             print('UNKNOWN ERROR')
         else:
-            print('OK')
+            return DateFormatter.timestamp_to_date(timestamp=timestamp)
 
     async def fetch_all(self, user_id: int) -> dict:
         """

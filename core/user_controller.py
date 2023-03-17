@@ -1,8 +1,7 @@
-import os
 from enum import Enum
 from typing import Optional
 
-from utils import user_id
+from core import FileController
 
 
 class UserState(Enum):
@@ -19,7 +18,7 @@ class UserState(Enum):
     GET_BY_TOPIC = 'GET_ALL_TP'
 
     @staticmethod
-    def audio_states():
+    def AUDIO_STATES():   # NOSONAR
         return [
             UserState.AUDIO_INPUT_TOPIC,
             UserState.AUDIO_INPUT_LANGUAGE,
@@ -28,14 +27,14 @@ class UserState(Enum):
         ]
 
     @staticmethod
-    def date_states_single():
+    def ONE_DATE_STATES():   # NOSONAR
         return [UserState.GET_BY_DATE, UserState.GET_ALL_AFTER]
 
 
 class Entry:
     def __init__(
-            self,
-            topic: str = '', text: str = '', date: str = '', timestamp: int = '', language: str = ''
+        self,
+        topic: str = '', text: str = '', date: str = '', timestamp: int = 0, language: str = ''
     ):
         self.language = language
         self.topic = topic
@@ -50,7 +49,9 @@ class Entry:
 
 
 class User:
-    def __init__(self, user_id: int, state: UserState = UserState.IDLE, current_entry: Entry = None):
+    def __init__(
+        self, user_id: int, state: UserState = UserState.IDLE, current_entry: Entry = None
+    ):
         self._id = user_id
         self._state = state
         self._current_entry = current_entry
@@ -69,21 +70,29 @@ class User:
         return self._current_entry
 
     def cache_entry_data(
-            self,
-            topic: str = '', text: str = '', date: str = '', timestamp: int = '', language: str = ''
+        self,
+        topic: str = '', text: str = '', date: str = '', timestamp: int = 0, language: str = ''
     ):
-        self._current_entry.topic = topic
-        self._current_entry.text = text
-        self._current_entry.date = date
-        self._current_entry.timestamp = timestamp
-        self._current_entry.language = language
+        if self._current_entry:
+            if self._current_entry.topic == '':
+                self._current_entry.topic = topic
+            if self._current_entry.text == '':
+                self._current_entry.text = text
+            if self._current_entry.date == '':
+                self._current_entry.date = date
+            if self._current_entry.timestamp == 0:
+                self._current_entry.timestamp = timestamp
+            if self._current_entry.language == '':
+                self._current_entry.language = language
+        else:
+            self._current_entry = Entry(topic, text, date, timestamp, language)
 
-    def get_voice_message_filename(self) -> str:
+    @property
+    def voice_message_filename(self) -> str:
         return f'{self._id}_{self._current_entry.timestamp}'
 
     def clear_cache(self):
-        os.remove(f'{self.get_voice_message_filename()}.ogg')
-        os.remove(f'{self.get_voice_message_filename()}.wav')
+        FileController.remove_files(filename=self.voice_message_filename)
         self._current_entry = None
         self.set_state(UserState.IDLE)
 
@@ -92,17 +101,14 @@ class UserController:
     def __init__(self, users: dict):
         self.users = users
 
-    def user(self, msg) -> Optional[User]:
-        return self.users.get(user_id(msg), None)
+    def user(self, uid) -> Optional[User]:
+        return self.users.get(uid, None)
 
-    def is_registered(self, msg) -> bool:
-        return self.user(msg) and not self.user(msg).is_state(None)
+    def is_registered(self, uid: int) -> bool:
+        return self.user(uid) and not self.user(uid).is_state(None)
 
-    def register(self, msg):
-        if self.user(msg) is None:
-            self.users[user_id(msg)] = User(
-                user_id=user_id(msg),
-                state=UserState.IDLE,
-            )
+    def register(self, uid: int):
+        if self.user(uid) is None:
+            self.users[uid] = User(user_id=uid, state=UserState.IDLE)
         else:
-            self.user(msg).set_state(UserState.IDLE)
+            self.user(uid).set_state(UserState.IDLE)

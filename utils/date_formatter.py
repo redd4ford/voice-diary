@@ -5,6 +5,7 @@ from dateutil import parser
 
 class DateFormatter:
     DATE_STRING_DEFAULT_FORMAT = '%Y-%m-%d %H:%M:%S'
+    DAYS_SINCE = {'Today': 0, 'Yesterday': 1, 'Past week': 7}
 
     @classmethod
     def get_current_date(cls) -> str:
@@ -72,5 +73,19 @@ class DateFormatter:
         # datestamps = YYYY-MM-DD 00:00:00 YYYY-MM-DD 23:59:59
         return (
             datestamps[:DateFormatter.DATESTAMP_LEN_WITH_TIME],
-            datestamps[(DateFormatter.DATESTAMP_LEN_WITH_TIME + 1):]   # omitting that space after the 1st datestamp
+            # omitting that space after the 1st datestamp
+            datestamps[(DateFormatter.DATESTAMP_LEN_WITH_TIME + 1):]
         )
+
+    @classmethod
+    def add_time_to_datestamp_if_needed(cls, datestamp: str) -> tuple[bool, str]:
+        # there are only two acceptable cases: either it's just a date or it's a date plus time
+        is_entered_date_contain_time = True
+        if len(datestamp) == DateFormatter.DATESTAMP_LEN_WITHOUT_TIME:
+            datestamp += ' 00:00:00'
+            is_entered_date_contain_time = False
+        return is_entered_date_contain_time, datestamp
+
+    @classmethod
+    def count_days_since(cls, choice: str) -> int:
+        return cls.DAYS_SINCE[choice]
